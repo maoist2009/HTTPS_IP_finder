@@ -1,6 +1,5 @@
-import aiohttp
-import aiohttp_socks
-import asyncio
+import threading
+import ssl
 from aiohttp.resolver import DefaultResolver
 
 from IPy import IP
@@ -13,61 +12,104 @@ num_asyncio = 20
 num_process = 5
 url="https://www.baidu.com"
 destinations=[]
-my_timeout = 10
+my_timeout = 5
 
 
-# python main.py --proxy http://127.0.0.1:2500 --ipr 10.0.0.0/24 --ipf ips.txt --ports 443 --portt 1445
+# python main.py --proxy 127.0.0.1:2500 --ipr 10.0.0.0/24 --ipf ips.txt --ports 443 --portt 1445
 # parse arguments
 
-import aiohttp.abc
 import socket
 
-class CustomResolver(DefaultResolver):
-    def __init__(self, ip, port, *args, **kwargs):
-        self.ip = ip
-        self.port = port
-        super().__init__()
-    async def resolve(self, host, port=0, family=0):
-        
-        print(f"解析域名{host}到{self.ip}:{self.port}")
-        return [aiohttp.abc.ResolveResult(
-                    hostname=host,
-                    host=self.ip,
-                    port=self.port,
-                    family=family,
-                    proto=0,
-                    flags=socket.AI_NUMERICHOST | socket.AI_NUMERICSERV,
-                )]
+logfile=open('log.txt', 'w+')
+
+def fprint(a,b,c):
+    logfile.write(a+":"+str(b)+"--------"+str(c)+'\r\n')
+    
+
+def fetch_with_ip(url,ip,port):
+    global HTTP_proxy
+    global my_timeout
+    try:
+        phost, pport = HTTP_proxy.split(':')
+        pport = int(pport)
+        host= url.split('//')[1].split('/')[0]
 
 
-async def fetch_with_ip(url,ip,port):
-    host_connector = aiohttp.TCPConnector(resolver=CustomResolver(ip=ip,port=port))
-
-
-    async with aiohttp.ClientSession(connector=host_connector) as session:
+        # 创建TCP连接
         try:
-            response = await asyncio.wait_for(session.get(url),timeout=my_timeout)
-            print(f"IP:{ip} port {port} 状态码：{response.status}")
-        except asyncio.TimeoutError:
-            print(f"IP:{ip} port {port} 超时")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         except Exception as e:
-            print(f"IP:{ip} port {port} 异常：{e}")
-            raise e
+            print("TCP Error",e)
+        
+        sock.settimeout(my_timeout)
+
+        
+        if HTTP_proxy:
+            sock.connect((phost, pport))
+
+
+            # HTTP proxy CONNECT
+            request = f"CONNECT {ip}:{port} HTTP/1.1\r\n"+f"Host: {host}\r\n"+"Proxy-Connection: Keep-Alive\r\n"+"User-Agent: Python-asyncio\r\n"+"\r\n"        
+            # print(request)
+            sock.sendall(request.encode(encoding='utf-8'))
+            response = sock.recv(1024)
+            response = response.decode(encoding='utf-8')
+            # print(response)
+            if response.split()[1]!= '200':
+                print("Proxy CONNECT Error",e)
+                raise(e)
+        else:
+            sock.connect((ip, port))
+
+        # wrap ssl
+        
+        ssl_context = ssl.create_default_context()
+        ssl_sock = ssl_context.wrap_socket(sock, server_hostname=host)
+
+        # send request
+        if(len(url.split('//')[1].split('/',1)) == 1):
+            url="/"
+        else:
+            url="/"+url.split('//')[1].split('/',1)[1]
+        # print(url)
+        request = f"GET {url} HTTP/1.1\r\n"+"Host: "+host+"\r\n"+"Connection: close\r\n"+"User-Agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36 Edg/109.0.1518.140\r\n"+"\r\n"
+        # print(request)
+        ssl_sock.sendall(request.encode(encoding='utf-8'))
+        
+        # receive response
+        response = ssl_sock.recv(16384)
+        response = response.decode(encoding='utf-8')
+        
+        # response code
+        fprint(ip,port,response.split('\r\n')[0].split()[1])
+        # print(response)
+        
+    except Exception as e:
+        if e==socket.timeout:
+            fprint(ip,port,"Timeout")
+        elif e==ssl.SSLError:
+            fprint(ip,port,"SSL Error")
+        elif e==socket.error:
+            fprint(ip,port,"Socket Error")
+        else:
+            fprint(ip,port,e)
+    
+
 
 
 # 运行主函数
-async def do_fetch(url,destinations):
+def do_fetch(url,destinations):
     print(destinations)
-    tasks = []
+    threads = []
     for ip,port in destinations:
-        tasks.append(asyncio.create_task(fetch_with_ip(url,ip,port)))
+        thread_up = threading.Thread(target = fetch_with_ip , args =(url,ip,port) )
+        threads.append(thread_up)
+        thread_up.daemon = True   #avoid memory leak by telling os its belong to main program , its not a separate program , so gc collect it when thread finish
+        thread_up.start()
     
-    for task in tasks:
-        await task
+    for thread in threads:
+        thread.join()
 
-def _do_fetch(url,destinations):
-    # print(destinations)
-    asyncio.run(do_fetch(url,destinations))
 
 def scan_ips():
     global url
@@ -78,12 +120,14 @@ def scan_ips():
     import multiprocessing
     
     # _do_fetch(url,destinations)
+    for i in range(0,len(destinations),num_asyncio):
+        do_fetch(url,destinations[i:min(i+num_asyncio,len(destinations))])
 
-    with multiprocessing.Pool(num_process) as pool:
-        for i in range(0,len(destinations),num_asyncio):
-            pool.apply_async(_do_fetch, args=(url,destinations[i:min(i+num_asyncio,len(destinations))]))
-        pool.close()
-        pool.join()
+    # with multiprocessing.Pool(num_process) as pool:
+    #     for i in range(0,len(destinations),num_asyncio):
+    #         pool.apply_async(_do_fetch, args=(url,destinations[i:min(i+num_asyncio,len(destinations))]))
+    #     pool.close()
+    #     pool.join()
 
     
 
@@ -100,7 +144,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='命令行参数解析示例')
     
-    parser.add_argument('--proxy', type=str, nargs='?',help='使用的反DPI代理')
+    parser.add_argument('--proxy', type=str, nargs='?',help='使用的反DPI代理（HTTP）')
     parser.add_argument('--url', type=str, nargs='?',help='目标url')
     parser.add_argument('--ipr', type=str, nargs='?',help='ip范围，形如10.0.0.0/24，与ipf参数二选一')
     parser.add_argument('--ipf', type=str, nargs='?',help='（ip范围或ip）文件位置，每行一个ip，与ipr参数二选一，多有则取ipf文件')
