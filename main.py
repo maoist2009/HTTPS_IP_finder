@@ -13,7 +13,9 @@ num_process = 5
 url="https://www.baidu.com"
 destinations=[]
 my_timeout = 5
-
+ignore_cert = False
+check200 = None
+check_content = None
 
 # python main.py --proxy 127.0.0.1:2500 --ipr 10.0.0.0/24 --ipf ips.txt --ports 443 --portt 1445
 # parse arguments
@@ -64,6 +66,11 @@ def fetch_with_ip(url,ip,port):
         # wrap ssl
         
         ssl_context = ssl.create_default_context()
+
+        if ignore_cert:
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
         ssl_sock = ssl_context.wrap_socket(sock, server_hostname=host)
 
         # send request
@@ -79,10 +86,11 @@ def fetch_with_ip(url,ip,port):
         # receive response
         response = ssl_sock.recv(16384)
         response = response.decode(encoding='utf-8')
-        
+        response_code = response.split('\r\n')[0].split()[1]
         # response code
-        fprint(ip,port,response.split('\r\n')[0].split()[1])
-        # print(response)
+        fprint(ip,port,response_code)
+
+        print(response)
         
     except Exception as e:
         if e==socket.timeout:
@@ -153,9 +161,12 @@ def main():
     parser.add_argument('--numasyncio', type=int, nargs='?',help='单进程最大异步请求数，默认20')
     parser.add_argument('--numprocess', type=int, nargs='?',help='同时最大进程数，默认5')
     parser.add_argument('--timeout', type=int, nargs='?',help='单连接超时事件，默认10秒')
+    parser.add_argument('--ignore-cert',type=bool, nargs='?',help='是否忽略证书错误，默认False')
+    parser.add_argument('--check200',type=str, nargs='?',help='如果为200响应，判断响应内容是否符合对应文件内容')
 
 
     try:
+        global check200
         # 解析参数
         args = parser.parse_args()
         # 访问参数
@@ -187,6 +198,10 @@ def main():
             url = args.url
         if args.timeout:
             my_timeout = args.timeout
+        if args.ignore_cert:
+            ignore_cert = args.ignore_cert
+        if args.check200:
+            check200 = args.check200
         
     except Exception as e:
         print(e)
@@ -196,6 +211,11 @@ def main():
         for port in ports:
             destinations.append((ip,port))
     # print(destinations)
+
+    if check200:
+        with open(check200, 'r') as f:
+            global check_content
+            check_content = f.read()
 
     try:
         print(url)
