@@ -12,7 +12,7 @@ num_asyncio = 20
 num_process = 5
 url="https://www.baidu.com"
 destinations=[]
-my_timeout = 5
+my_timeout = 10
 
 
 # python main.py --proxy 127.0.0.1:2500 --ipr 10.0.0.0/24 --ipf ips.txt --ports 443 --portt 1445
@@ -23,6 +23,7 @@ import socket
 logfile=open('log.txt', 'w+')
 
 def fprint(a,b,c):
+    print(a+":"+str(b)+"--------"+str(c))
     logfile.write(a+":"+str(b)+"--------"+str(c)+'\r\n')
     
 
