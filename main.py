@@ -18,6 +18,7 @@ check200 = None
 check_content = None
 
 
+
 # python main.py --proxy 127.0.0.1:2500 --ipr 10.0.0.0/24 --ipf ips.txt --ports 443 --portt 1445
 # parse arguments
 
@@ -25,9 +26,16 @@ import socket
 
 logfile=open('log.txt', 'w+')
 
+lock = threading.Lock()
+
+
 def fprint(a,b,c):
-    print(a+":"+str(b)+"--------"+str(c))
-    logfile.write(a+":"+str(b)+"--------"+str(c)+'\r\n')
+    lock.acquire()
+    try:
+        print(a+":"+str(b)+"--------"+str(c))
+        logfile.write(a+":"+str(b)+"--------"+str(c)+'\r\n')
+    finally:
+        lock.release()
     
 
 def fetch_with_ip(url,ip,port):
@@ -69,6 +77,7 @@ def fetch_with_ip(url,ip,port):
         
         ssl_context = ssl.create_default_context()
 
+
         if ignore_cert:
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
@@ -86,13 +95,24 @@ def fetch_with_ip(url,ip,port):
         ssl_sock.sendall(request.encode(encoding='utf-8'))
         
         # receive response
-        response = ssl_sock.recv(16384)
+        response = b''
+        while True:
+            data = ssl_sock.recv(16384)
+            if not data:
+                break
+            response = response + data
         response = response.decode(encoding='utf-8')
         response_code = response.split('\r\n')[0].split()[1]
         # response code
         fprint(ip,port,response_code)
-
-        print(response)
+        if check200 and response_code == '200':
+            lock.acquire()
+            try:
+                print("check not implemented, write to "+ip+"_"+str(port)+".rsp")
+                with open("rsp/"+ip+"_"+str(port)+".rsp", 'w+') as f:
+                    f.write(response)
+            finally:
+                lock.release()
         
     except Exception as e:
         if e==socket.timeout:
@@ -163,7 +183,7 @@ def main():
     parser.add_argument('--numasyncio', type=int, nargs='?',help='单进程最大异步请求数，默认20')
     parser.add_argument('--numprocess', type=int, nargs='?',help='同时最大进程数，默认5')
     parser.add_argument('--timeout', type=int, nargs='?',help='单连接超时事件，默认10秒')
-    parser.add_argument('--ignore-cert',type=bool, nargs='?',help='是否忽略证书错误，默认False')
+    parser.add_argument('--ignore-cert',default=False,action='store_true',help='是否忽略证书错误，默认False')
     parser.add_argument('--check200',type=str, nargs='?',help='如果为200响应，判断响应内容是否符合对应文件内容')
 
 
@@ -201,7 +221,8 @@ def main():
         if args.timeout:
             my_timeout = args.timeout
         if args.ignore_cert:
-            ignore_cert = args.ignore_cert
+            global ignore_cert
+            ignore_cert = True
         if args.check200:
             check200 = args.check200
         
