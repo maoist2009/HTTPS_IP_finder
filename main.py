@@ -1,8 +1,8 @@
 import threading
 import ssl
 from aiohttp.resolver import DefaultResolver
-
 from IPy import IP
+import chardet
 
 # parse arguments
 HTTP_proxy = None
@@ -15,7 +15,10 @@ destinations=[]
 my_timeout = 5
 ignore_cert = False
 check200 = None
+check30x = False
 check_content = None
+
+logpath = ""
 
 
 
@@ -24,7 +27,7 @@ check_content = None
 
 import socket
 
-logfile=open('log.txt', 'w+')
+logfile=None
 
 lock = threading.Lock()
 
@@ -101,18 +104,21 @@ def fetch_with_ip(url,ip,port):
             if not data:
                 break
             response = response + data
-        response = response.decode(encoding='utf-8')
+        response = response.decode(encoding='utf-8',errors='replace')
         response_code = response.split('\r\n')[0].split()[1]
         # response code
         fprint(ip,port,response_code)
-        if check200 and response_code == '200':
-            lock.acquire()
-            try:
-                print("check not implemented, write to "+ip+"_"+str(port)+".rsp")
-                with open("rsp/"+ip+"_"+str(port)+".rsp", 'w+') as f:
+        if (check200 and response_code == '200') or (check30x and response_code.startswith('3')):
+            print("check not implemented, write to "+logpath+response_code+"/"+ip+"_"+str(port)+".rsp")
+            try: 
+                import os
+                os.makedirs(logpath+response_code+"/", exist_ok=True)
+                with open(logpath+response_code+"/"+ip+"_"+str(port)+".rsp", 'w+', encoding='utf-8', errors='replace') as f:
                     f.write(response)
-            finally:
-                lock.release()
+            except Exception as e:
+                print("output error",e)
+
+        
         
     except Exception as e:
         if e==socket.timeout:
@@ -185,10 +191,9 @@ def main():
     parser.add_argument('--timeout', type=int, nargs='?',help='单连接超时事件，默认10秒')
     parser.add_argument('--ignore-cert',default=False,action='store_true',help='是否忽略证书错误，默认False')
     parser.add_argument('--check200',type=str, nargs='?',help='如果为200响应，判断响应内容是否符合对应文件内容')
-
+    parser.add_argument('--check30x',default=False,action='store_true',help='是否检查30x跳转，默认False')
 
     try:
-        global check200
         # 解析参数
         args = parser.parse_args()
         # 访问参数
@@ -200,31 +205,41 @@ def main():
                 ips.append(str(ip))
         if args.ipf:
             with open(args.ipf, 'r') as f:
-                temp_ips = f.readlines()
-                if temp_ips.find('/')!= -1:
-                    temp_ips=IP(temp_ips)
-                    for ip in temp_ips:
-                        ips.append(str(ip))
-                else:
-                    ips.append(str(temp_ips))
+                lines = f.readlines()
+                for line in lines:
+                    temp_ips = line.strip()
+                    if temp_ips.find('/')!= -1:
+                        temp_ips=IP(temp_ips)
+                        for ip in temp_ips:
+                            ips.append(str(ip))
+                    else:
+                        ips.append(str(temp_ips))
         if args.ports:
             if args.portt:
                 ports = range(int(args.ports), int(args.portt))
             else:
                 ports = [int(args.ports)]
         if args.numasyncio:
+            global num_asyncio
             num_asyncio = args.numasyncio
         if args.numprocess:
+            global num_process
             num_process = args.numprocess
         if args.url:
+            global url
             url = args.url
         if args.timeout:
+            global my_timeout
             my_timeout = args.timeout
         if args.ignore_cert:
             global ignore_cert
             ignore_cert = True
         if args.check200:
+            global check200
             check200 = args.check200
+        if args.check30x:
+            global check30x
+            check30x = True
         
     except Exception as e:
         print(e)
@@ -235,16 +250,35 @@ def main():
             destinations.append((ip,port))
     # print(destinations)
 
+
+    import os
+    
+    from hashlib import md5
+    import time
+    global logpath
+    logpath="rsp/"+md5((url+str(time.time())).encode(encoding='utf-8')).hexdigest()+"/"
+    os.makedirs(logpath, exist_ok=True)
+    print("日志位置："+logpath)
+    global logfile
+    logfile=open(logpath+"log.txt","w+",encoding='utf-8')
+
+    with open("log.txt", 'a+', encoding='utf-8') as f:
+        # 输出传入参数和时间到日志文件
+        f.write(logpath+": "+str(time.time())+" "+str(args)+'\r\n')
+
+
     if check200:
         with open(check200, 'r') as f:
             global check_content
             check_content = f.read()
 
     try:
-        print(url)
+        print("开始扫描：",url)
         scan_ips()
     except KeyboardInterrupt:
         print("用户中断")
+
+    print("日志位置："+logpath)
         
     
 main()
