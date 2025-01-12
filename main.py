@@ -245,6 +245,18 @@ def main():
         print(e)
         parser.print_help()
 
+    ipsed={}
+    ipst=[]
+    for ip in ips:
+        if ipsed.get(ip)==None:
+            ipst.append(ip)
+            ipsed[ip]=1
+    print(len(ipst))
+    import copy
+    ips=copy.deepcopy(ipst)
+    ipst=[]
+    ipsed={}
+
     for ip in ips:
         for port in ports:
             destinations.append((ip,port))
