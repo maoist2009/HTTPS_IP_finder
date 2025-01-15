@@ -1,6 +1,5 @@
 import threading
 import ssl
-from aiohttp.resolver import DefaultResolver
 from IPy import IP
 import chardet
 
@@ -109,10 +108,12 @@ def fetch_with_ip(url,ip,port):
         # response code
         fprint(ip,port,response_code)
         if (check200 and response_code == '200') or (check30x and response_code.startswith('3')):
-            print("check not implemented, write to "+logpath+response_code+"/"+ip+"_"+str(port)+".rsp")
             try: 
                 import os
                 os.makedirs(logpath+response_code+"/", exist_ok=True)
+                if ip.find(':')!=-1:
+                    ip=ip.replace(':','.')
+                print("check not implemented, write to "+logpath+response_code+"/"+ip+"_"+str(port)+".rsp")
                 with open(logpath+response_code+"/"+ip+"_"+str(port)+".rsp", 'w+', encoding='utf-8', errors='replace') as f:
                     f.write(response)
             except Exception as e:
