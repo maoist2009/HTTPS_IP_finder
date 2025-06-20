@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>生成IP地址列表</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background-color: #f9f9f9;
+    }
+    textarea {
+      width: 100%;
+      height: 400px;
+      font-family: monospace;
+      white-space: pre;
+      border: 1px solid #ccc;
+      padding: 10px;
+      resize: vertical;
+    }
+    button {
+      margin-top: 10px;
+      padding: 10px 15px;
+      margin-right: 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    h2 {
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>生成 151.101.*.133 的 IP 列表</h1>
+
+  <textarea id="ipTextarea" readonly></textarea>
+
+  <br>
+  <button onclick="copyToClipboard()">复制到剪贴板</button>
+  <button onclick="downloadTxt()">下载为 TXT 文件</button>
+
+  <script>
+    const baseIp = "199.232";
+    const lastPart = "133";
+    const textarea = document.getElementById("ipTextarea");
+
+    // 生成IP列表
+    let ipText = "";
+    for (let i = 0; i <= 255; i++) {
+      ipText += `${baseIp}.${i}.${lastPart}\n`;
+    }
+    textarea.value = ipText;
+
+    // 复制到剪贴板
+    function copyToClipboard() {
+      textarea.select();
+      textarea.setSelectionRange(0, 99999); // For mobile devices
+      document.execCommand("copy");
+      alert("已复制到剪贴板！");
+    }
+
+    // 下载为txt文件
+    function downloadTxt() {
+      const blob = new Blob([ipText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ip_list.txt";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  </script>
+
+</body>
+</html>
