@@ -12,6 +12,7 @@ timeout = 3          # 单次连接超时时间（秒）
 retries = 3          # 每个目标尝试次数
 destinations = []    # 存储所有 (ip, port) 目标
 results = {}         # 存储最终结果 { (ip,port): avg_delay }
+vtimeout= 3000  # 超时摊入平均的值（毫秒）
 lock = threading.Lock()
 
 def tcp_ping(ip, port):
@@ -26,9 +27,9 @@ def tcp_ping(ip, port):
                 if result == 0:
                     delays.append(elapsed)
                 else:
-                    delays.append(1000)  # 连接失败则标记为1000ms
+                    delays.append(vtimeout)  # 连接失败则标记为vtimeout
         except Exception:
-            delays.append(1000)
+            delays.append(vtimeout)
 
     avg_delay = sum(delays) / len(delays)
     with lock:
@@ -60,12 +61,15 @@ def main():
     parser.add_argument('--numasyncio', type=int, default=20, help='单次最大并发线程数，默认20')
     parser.add_argument('--retries', type=int, default=3, help='每个目标尝试次数，默认3次')
     parser.add_argument('--timeout', type=float, default=3, help='单次连接超时时间（秒），默认3秒')
+    parser.add_argument('--vtimeout', type=int, default=3000, help='超时摊入平均的值')
 
     args = parser.parse_args()
-
+    global num_asyncio, timeout, retries, vtimeout
     num_asyncio = args.numasyncio
     timeout = args.timeout
     retries = args.retries
+    vtimeout = args.vtimeout
+
     ports = list(map(int, args.ports.split(',')))
     ips = []
     destinations = []
