@@ -18,7 +18,8 @@ url = "https://www.baidu.com"
 destinations = []
 my_timeout = 5  # 连接和握手超时
 ignore_cert = False
-do_check200 = False
+save_content = False  # 替换do_check200，保存完整响应内容
+save_header = False   # 新增，仅保存响应头
 check30x = False
 speedtest_enabled = False
 speedtest_max_time = 10.0  # 测速最大时间，默认10秒
@@ -56,7 +57,7 @@ def fprint(ip, port, status, message="", speed_kbs=None):
 
 def fetch_with_ip(url, ip, port):
     """核心请求函数，处理单个IP和端口的请求"""
-    global HTTP_proxy, my_timeout, ignore_cert, do_check200, check30x, speedtest_enabled, speedtest_max_time, logpath
+    global HTTP_proxy, my_timeout, ignore_cert, save_content, save_header, check30x, speedtest_enabled, speedtest_max_time, logpath
     global is_wss, is_https
     sock = None
     ssl_sock = None
@@ -219,7 +220,8 @@ def fetch_with_ip(url, ip, port):
                         # 提取头部
                         try:
                             status_line = headers_data.split(b'\r\n', 1)[0].decode('utf-8', errors='replace')
-                            response_code = status_line.split(' ', 2)[1] if len(status_line.split(' ', 2)) >= 2 else "PARSE_ERROR"
+                            parts = status_line.split(' ', 2)
+                            response_code = parts[1] if len(parts) >= 2 else "PARSE_ERROR"
                             status_code = response_code  # 将HTTP状态码作为CSV状态
                         except Exception as e:
                             status_code = "HEADER_PARSE_ERROR"
@@ -228,11 +230,20 @@ def fetch_with_ip(url, ip, port):
                             logged = True
                             return
 
+                        # 处理30x过滤
+                        if check30x and not status_code.startswith('3'):
+                            status_code = "SKIPPED"
+                            message = "Not a 3xx response, skipped due to --check30x"
+                            fprint(ip, port, status_code, message)
+                            logged = True
+                            return
+
                         # 处理状态码
                         if speedtest_enabled and response_code == '200':
                             speedtest_start_time = time.time()
                             body_bytes_received += len(data) - (header_end_index + 4)
-                        if (do_check200 and response_code == '200') or (check30x and response_code.startswith('3')):
+                        # 保存内容或头部的条件检查
+                        if (save_content or save_header) and response_code.isdigit() and len(response_code) == 3:
                             response_data = headers_data
 
                 else:
@@ -251,7 +262,7 @@ def fetch_with_ip(url, ip, port):
                             break
 
                     # 保存模式累积数据
-                    if (do_check200 and response_code == '200') or (check30x and response_code.startswith('3')):
+                    if (save_content or save_header) and response_code.isdigit() and len(response_code) == 3:
                         response_data += data
 
             # --- 循环结束后的处理 ---
@@ -267,32 +278,40 @@ def fetch_with_ip(url, ip, port):
                     logged = True
                 elif headers_received:
                     status_code = response_code if response_code else "UNKNOWN"
-                    # 保存响应内容
-                    if not speedtest_enabled:
-                        if do_check200 and status_code == '200':
-                            try:
-                                safe_ip = ip.replace(':', '.')
-                                output_dir = os.path.join(logpath, status_code)
-                                os.makedirs(output_dir, exist_ok=True)
+                    # 保存响应内容或头部
+                    if not speedtest_enabled and (save_content or save_header) and status_code.isdigit() and len(status_code) == 3:
+                        try:
+                            safe_ip = ip.replace(':', '.')
+                            output_dir = os.path.join(logpath, status_code)
+                            os.makedirs(output_dir, exist_ok=True)
+                            
+                            if save_content:
                                 output_file = os.path.join(output_dir, f"{safe_ip}_{port}.rsp")
                                 with open(output_file, 'wb') as f:
                                     f.write(response_data)
-                                message = f"Saved to {output_file}"
-                            except Exception as e:
-                                status_code = "SAVE_ERROR"
-                                message = str(e)
-                        elif check30x and status_code.startswith('3'):
-                            try:
-                                safe_ip = ip.replace(':', '.')
-                                output_dir = os.path.join(logpath, status_code)
-                                os.makedirs(output_dir, exist_ok=True)
-                                output_file = os.path.join(output_dir, f"{safe_ip}_{port}.rsp")
+                                additional_message = f"Content saved to {output_file}"
+                            elif save_header:
+                                # 仅提取头部
+                                header_end = response_data.find(b'\r\n\r\n')
+                                if header_end != -1:
+                                    header_data = response_data[:header_end + 4]  # 包括 \r\n\r\n
+                                else:
+                                    header_data = response_data  # 如果找不到头部结束，就保存所有内容
+                                
+                                output_file = os.path.join(output_dir, f"{safe_ip}_{port}_header.txt")
                                 with open(output_file, 'wb') as f:
-                                    f.write(response_data)
-                                message = f"Saved to {output_file}"
-                            except Exception as e:
-                                status_code = "SAVE_3XX_ERROR"
-                                message = str(e)
+                                    f.write(header_data)
+                                additional_message = f"Header saved to {output_file}"
+                            
+                            # 合并消息
+                            if message:
+                                message += f"; {additional_message}"
+                            else:
+                                message = additional_message
+                        except Exception as e:
+                            status_code = "SAVE_ERROR"
+                            message = str(e)
+                    
                     fprint(ip, port, status_code, message, speed_kbs)
                     logged = True
                 else:
@@ -371,7 +390,7 @@ def scan_ips():
 def main():
     """主函数，负责参数解析和初始化"""
     global HTTP_proxy, ips, ports, num_asyncio, url, destinations, my_timeout
-    global ignore_cert, do_check200, check30x, speedtest_enabled, speedtest_max_time, logpath, csvfile, csv_writer
+    global ignore_cert, save_content, save_header, check30x, speedtest_enabled, speedtest_max_time, logpath, csvfile, csv_writer
     global is_wss, is_https
     
     parser = argparse.ArgumentParser(description='IP Direct Connection Scanner (Thread Version)')
@@ -384,12 +403,12 @@ def main():
     parser.add_argument('--numasyncio', type=int, help='Max threads per batch (default 20)')
     parser.add_argument('--timeout', type=int, help='Connection/Handshake timeout (default 5s)')
     parser.add_argument('--ignore-cert', action='store_true', help='Ignore SSL certificate errors')
-    # 添加互斥组
-    mutex_group = parser.add_mutually_exclusive_group()
-    mutex_group.add_argument('--check200', action='store_true', help='Save 200 OK responses to files')
+    # 添加内容保存选项
+    parser.add_argument('--savecontent', action='store_true', help='Save response content by status code (e.g., 200, 301, 404)')
+    parser.add_argument('--saveheader', action='store_true', help='Save response headers by status code (e.g., 200, 301, 404)')
     parser.add_argument('--speedtest', action='store_true', help='Perform download speed test for 200 responses')
     parser.add_argument('--maxtime', type=float, default=10.0, help='Max download time for speed test in seconds (default 10.0s, requires --speedtest)')
-    parser.add_argument('--check30x', action='store_true', help='Check for 3xx redirects and save them')
+    parser.add_argument('--check30x', action='store_true', help='Only check 3xx redirects')
     args = parser.parse_args()
     
     # 处理URL
@@ -473,8 +492,10 @@ def main():
             print(f"Invalid timeout '{args.timeout}', using default 5")
     if args.ignore_cert:
         ignore_cert = True
-    if args.check200:
-        do_check200 = True
+    if args.savecontent:
+        save_content = True
+    if args.saveheader:
+        save_header = True
     if args.check30x:
         check30x = True
     if args.speedtest:
@@ -518,7 +539,17 @@ def main():
         if is_wss:
             mode_str = "WSS"
         else:
-            mode_str = "Speedtest" if speedtest_enabled else ("Check200" if do_check200 else ("Check30x" if check30x else "Basic"))
+            mode_str = ""
+            if speedtest_enabled:
+                mode_str += "Speedtest"
+            if save_content:
+                mode_str += " (SaveContent)" if mode_str else "SaveContent"
+            if save_header:
+                mode_str += " (SaveHeader)" if mode_str else "SaveHeader"
+            if check30x:
+                mode_str += " (3xx Only)" if mode_str else "3xx Only"
+            if not mode_str:
+                mode_str = "Basic"
         print(f"Starting {mode_str} scan for {args.url}...")
         scan_ips()
     except KeyboardInterrupt:
